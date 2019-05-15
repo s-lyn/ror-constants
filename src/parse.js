@@ -3,27 +3,9 @@ const cheerio = require('cheerio')
 const fs = require('fs-extra')
 const path = require('path')
 const debug = require('debug')('ror-constants')
+const { parseCSVList, promiseRepeat } = require('./utils/functions')
 
 const FILE_NAME = path.join(__dirname, '../data/all.json')
-
-function parseCSVList (body) {
-  return body
-    .split('\n')
-    .map(el => {
-      const value = String(el).trim()
-      if (!value) {
-        return null
-      }
-      const obj = value.split(';')
-      if (obj.length === 2) {
-        return {
-          id: obj[0],
-          value: obj[1]
-        }
-      }
-    })
-    .filter(el => !!el)
-}
 
 async function parseSubjects () {
   const url =
@@ -71,16 +53,18 @@ async function getChildrenTypes (parentId) {
 async function run () {
   let count = 0
   // Parse cadastral subjects
-  let subjects = await parseSubjects()
+  let subjects = await promiseRepeat(() => parseSubjects())
   // Parse cadastral regions
   for (const subject of subjects) {
     debug(`Parsing subject "${subject.value}"`)
-    let regions = await getChildren(subject.id, 'region')
+    let regions = await promiseRepeat(() => getChildren(subject.id, 'region'))
     subject.children = regions
     // Parse region's settlement types
     for (const region of regions) {
+      debug(`Parsing region "${region.value}"`)
       region.children = []
-      const settlementTypes = await getChildrenTypes(region.id)
+      const settlementTypes =
+        await promiseRepeat(() => getChildrenTypes(region.id))
       // Parse each settlement type separately
       for (const settlementType of settlementTypes) {
         const {
@@ -88,7 +72,9 @@ async function run () {
           value: settlementTypeValue
         } = settlementType
         let settlements =
-          await getChildren(region.id, 'settlement', settlementTypeId)
+          await promiseRepeat(
+            () => getChildren(region.id, 'settlement', settlementTypeId)
+          )
         settlements = settlements
           .map(settlement => Object.assign(settlement, {
             settlementId: settlementTypeId,
